@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Butterfly Effect Visualization</title>
+    <script src="https://cdn.jsdelivr.net/npm/p5@1.8.0/lib/p5.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #0a0a1a;
+        }
+        #controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background-color: rgba(10, 10, 30, 0.85);
+            padding: 15px;
+            border-radius: 8px;
+            color: #e0e0ff;
+            font-family: Arial, sans-serif;
+            max-width: 300px;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.5);
+            transition: opacity 0.3s;
+        }
+        #toggle-controls {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 8px 15px;
+            background-color: rgba(30, 30, 60, 0.8);
+            color: white;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+            z-index: 100;
+            font-size: 14px;
+        }
+        .control-group {
+            margin-bottom: 10px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 14px;
+        }
+        button {
+            background-color: #3a3a7a;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 5px;
+            font-size: 12px;
+        }
+        button:hover {
+            background-color: #4a4a9a;
+        }
+        input[type="range"] {
+            width: 100%;
+        }
+        .info-text {
+            font-size: 12px;
+            color: #a0a0ff;
+            margin-top: 10px;
+            line-height: 1.4;
+        }
+    </style>
+
+<base target="_self">
+
+
+    <div id="controls">
+        <h3>Butterfly Effect</h3>
+        <div class="control-group">
+            <label>Click to launch particle pairs</label>
+            <button id="reset">Reset System</button>
+            <button id="clear">Clear Trails</button>
+        </div>
+        <div class="control-group">
+            <label>Time Scale: <span id="time-scale-value">1.0</span>x</label>
+            <input type="range" id="time-scale" min="0.1" max="3" step="0.1" value="1">
+        </div>
+        <div class="control-group">
+            <label>Flow Field Intensity: <span id="flow-intensity-value">0.5</span></label>
+            <input type="range" id="flow-intensity" min="0" max="1" step="0.05" value="0.5">
+        </div>
+        <div class="control-group">
+            <label>Particle Size: <span id="particle-size-value">2</span></label>
+            <input type="range" id="particle-size" min="1" max="5" step="0.5" value="2">
+        </div>
+        <div class="info-text">
+            Observe how nearly identical particles diverge over time due to tiny initial differences in a dynamic flow field.
+        </div>
+    </div>
+    <button id="toggle-controls">Hide Controls</button>
+    <script>
+        const sketch = (p) => {
+            // Constants and configuration
+            const MAX_PARTICLES = 1000;
+            const MAX_TRAIL_POINTS = 5000;
+            const FLOW_FIELD_RESOLUTION = 20;
+            const COLOR_PALETTE = [
+                p.color(255, 100, 150, 150),
+                p.color(100, 200, 255, 150),
+                p.color(150, 255, 150, 150),
+                p.color(255, 200, 100, 150)
+            ];
+            
+            // System state
+            let particles = [];
+            let flowField = [];
+            let timeScale = 1.0;
+            let flowIntensity = 0.5;
+            let particleSize = 2;
+            let controlsVisible = true;
+            let lastFrameTime = 0;
+            let qualityLevel = 1;
+            
+            // DOM elements
+            let timeScaleSlider, timeScaleValue;
+            let flowIntensitySlider, flowIntensityValue;
+            let particleSizeSlider, particleSizeValue;
+            let resetButton, clearButton, toggleControlsButton;
+            let controlsDiv;
+            
+            p.setup = () => {
+                p.createCanvas(p.windowWidth, p.windowHeight);
+                p.colorMode(p.HSB, 360, 100, 100, 1);
+                p.noStroke();
+                
+                // Initialize flow field
+                initFlowField();
+                
+                // Setup DOM elements
+                setupDOM();
+                
+                // Load saved control panel state
+                loadControlPanelState();
+            };
+            
+            function setupDOM() {
+                controlsDiv = p.select('#controls');
+                toggleControlsButton = p.select('#toggle-controls');
+                timeScaleSlider = p.select('#time-scale');
+                timeScaleValue = p.select('#time-scale-value');
+                flowIntensitySlider = p.select('#flow-intensity');
+                flowIntensityValue = p.select('#flow-intensity-value');
+                particleSizeSlider = p.select('#particle-size');
+                particleSizeValue = p.select('#particle-size-value');
+                resetButton = p.select('#reset');
+                clearButton = p.select('#clear');
+                
+                // Event listeners
+                timeScaleSlider.input(() => {
+                    timeScale = parseFloat(timeScaleSlider.value());
+                    timeScaleValue.html(timeScale.toFixed(1) + 'x');
+                });
+                
+                flowIntensitySlider.input(() => {
+                    flowIntensity = parseFloat(flowIntensitySlider.value());
+                    flowIntensityValue.html(flowIntensity.toFixed(2));
+                });
+                
+                particleSizeSlider.input(() => {
+                    particleSize = parseFloat(particleSizeSlider.value());
+                    particleSizeValue.html(particleSize.toFixed(1));
+                });
+                
+                resetButton.mousePressed(() => {
+                    particles = [];
+                });
+                
+                clearButton.mousePressed(() => {
+                    particles.forEach(particle => {
+                        particle.trail = [];
+                    });
+                });
+                
+                toggleControlsButton.mousePressed(() => {
+                    controlsVisible = !controlsVisible;
+                    controlsDiv.style('opacity', controlsVisible ? '1' : '0');
+                    toggleControlsButton.html(controlsVisible ? 'Hide Controls' : 'Show Controls');
+                    saveControlPanelState();
+                });
+            }
+            
+            function loadControlPanelState() {
+                const savedState = localStorage.getItem('controlsVisible');
+                if (savedState !== null) {
+                    controlsVisible = savedState === 'true';
+                    controlsDiv.style('opacity', controlsVisible ? '1' : '0');
+                    toggleControlsButton.html(controlsVisible ? 'Hide Controls' : 'Show Controls');
+                }
+            }
+            
+            function saveControlPanelState() {
+                localStorage.setItem('controlsVisible', controlsVisible);
+            }
+            
+            function initFlowField() {
+                const cols = Math.ceil(p.width / FLOW_FIELD_RESOLUTION) + 1;
+                const rows = Math.ceil(p.height / FLOW_FIELD_RESOLUTION) + 1;
+                
+                flowField = new Array(cols);
+                for (let i = 0; i < cols; i++) {
+                    flowField[i] = new Array(rows);
+                    for (let j = 0; j < rows; j++) {
+                        flowField[i][j] = p.createVector(0, 0);
+                    }
+                }
+            }
+            
+            function updateFlowField() {
+                const time = p.millis() * 0.0005;
+                
+                for (let i = 0; i < flowField.length; i++) {
+                    for (let j = 0; j < flowField[i].length; j++) {
+                        const x = i * FLOW_FIELD_RESOLUTION;
+                        const y = j * FLOW_FIELD_RESOLUTION;
+                        
+                        // Use Perlin noise to create organic flow patterns
+                        const angle = p.noise(x * 0.005, y * 0.005, time) * p.TWO_PI * 4;
+                        const strength = p.noise(x * 0.01 + 100, y * 0.01 + 100, time * 0.5) * flowIntensity;
+                        
+                        flowField[i][j].set(
+                            p.cos(angle) * strength,
+                            p.sin(angle) * strength
+                        );
+                    }
+                }
+            }
+            
+            function getFlowForce(x, y) {
+                const col = p.constrain(Math.floor(x / FLOW_FIELD_RESOLUTION), 0, flowField.length - 1);
+                const row = p.constrain(Math.floor(y / FLOW_FIELD_RESOLUTION), 0, flowField[0].length - 1);
+                
+                // Simple bilinear interpolation
+                const xFrac = (x % FLOW_FIELD_RESOLUTION) / FLOW_FIELD_RESOLUTION;
+                const yFrac = (y % FLOW_FIELD_RESOLUTION) / FLOW_FIELD_RESOLUTION;
+                
+                const top = p.lerpVector(
+                    flowField[col][row],
+                    flowField[col + 1] ? flowField[col + 1][row] : flowField[col][row],
+                    xFrac
+                );
+                
+                const bottom = p.lerpVector(
+                    flowField[col][row + 1] ? flowField[col][row + 1] : flowField[col][row],
+                    flowField[col + 1] && flowField[col + 1][row + 1] ? flowField[col + 1][row + 1] : flowField[col][row],
+                    xFrac
+                );
+                
+                return p.lerpVector(top, bottom, yFrac);
+            }
+            
+            p.lerpVector = (v1, v2, amt) => {
+                return p.createVector(
+                    p.lerp(v1.x, v2.x, amt),
+                    p.lerp(v1.y, v2.y, amt)
+                );
+            };
+            
+            class Particle {
+                constructor(x, y, color, offsetAngle = 0) {
+                    this.pos = p.createVector(x, y);
+                    this.vel = p.createVector(
+                        p.random(-0.5, 0.5) + p.cos(offsetAngle) * 0.5,
+                        p.random(-0.5, 0.5) + p.sin(offsetAngle) * 0.5
+                    );
+                    this.acc = p.createVector(0, 0);
+                    this.color = color;
+                    this.trail = [];
+                    this.maxTrailLength = 100 + p.random(50);
+                    this.size = particleSize * p.random(0.8, 1.2);
+                    this.life = 0;
+                }
+                
+                update() {
+                    this.life += timeScale;
+                    
+                    // Apply flow field force
+                    const flowForce = getFlowForce(this.pos.x, this.pos.y);
+                    this.acc.add(flowForce);
+                    
+                    // Add some random noise
+                    this.acc.add(p.createVector(
+                        p.random(-0.01, 0.01),
+                        p.random(-0.01, 0.01)
+                    ));
+                    
+                    // Update physics
+                    this.vel.add(this.acc.mult(timeScale));
+                    this.vel.limit(2);
+                    this.pos.add(this.vel);
+                    this.acc.mult(0);
+                    
+                    // Add current position to trail
+                    this.trail.push({
+                        x: this.pos.x,
+                        y: this.pos.y,
+                        alpha: 255
+                    });
+                    
+                    // Limit trail length
+                    if (this.trail.length > this.maxTrailLength) {
+                        this.trail.shift();
+                    }
+                    
+                    // Fade out trail points
+                    for (let i = 0; i < this.trail.length; i++) {
+                        this.trail[i].alpha *= 0.98;
+                    }
+                    
+                    // Wrap around edges
+                    if (this.pos.x < 0) this.pos.x = p.width;
+                    if (this.pos.x > p.width) this.pos.x = 0;
+                    if (this.pos.y < 0) this.pos.y = p.height;
+                    if (this.pos.y > p.height) this.pos.y = 0;
+                }
+                
+                display() {
+                    // Draw trail
+                    p.stroke(this.color);
+                    p.strokeWeight(this.size * 0.5);
+                    p.noFill();
+                    
+                    p.beginShape();
+                    for (let i = 0; i < this.trail.length; i++) {
+                        const point = this.trail[i];
+                        const alpha = p.map(i, 0, this.trail.length, 50, 200);
+                        p.stroke(p.hue(this.color), p.saturation(this.color), p.brightness(this.color), alpha * (point.alpha / 255));
+                        p.curveVertex(point.x, point.y);
+                    }
+                    p.endShape();
+                    
+                    // Draw particle
+                    p.noStroke();
+                    p.fill(this.color);
+                    p.circle(this.pos.x, this.pos.y, this.size);
+                }
+            }
+            
+            p.mousePressed = () => {
+                if (p.mouseX < p.width - 300 || p.mouseY > 150) {
+                    const color = COLOR_PALETTE[p.floor(p.random(COLOR_PALETTE.length))];
+                    const angle = p.random(p.TWO_PI);
+                    
+                    // Create two nearly identical particles with slight differences
+                    if (particles.length < MAX_PARTICLES - 2) {
+                        particles.push(new Particle(p.mouseX, p.mouseY, color, angle));
+                        particles.push(new Particle(
+                            p.mouseX + p.random(-2, 2),
+                            p.mouseY + p.random(-2, 2),
+                            color,
+                            angle + p.random(-0.05, 0.05)
+                        ));
+                    }
+                }
+            };
+            
+            p.draw = () => {
+                // Adaptive quality based on frame rate
+                adjustQuality();
+                
+                // Semi-transparent background for motion blur effect
+                p.fill(10, 10, 20, 20);
+                p.rect(0, 0, p.width, p.height);
+                
+                // Update and draw flow field
+                updateFlowField();
+                
+                // Update and draw particles
+                for (let i = particles.length - 1; i >= 0; i--) {
+                    particles[i].update();
+                    particles[i].display();
+                    
+                    // Remove old particles to prevent memory issues
+                    if (particles[i].life > 5000 && particles.length > 20) {
+                        particles.splice(i, 1);
+                    }
+                }
+                
+                // Display particle count
+                if (controlsVisible) {
+                    p.fill(200, 200, 255, 100);
+                    p.noStroke();
+                    p.textSize(14);
+                    p.text(`Particles: ${particles.length}/${MAX_PARTICLES}`, 20, 30);
+                }
+            };
+            
+            function adjustQuality() {
+                // Simple frame rate monitoring
+                const now = p.millis();
+                const delta = now - lastFrameTime;
+                lastFrameTime = now;
+                
+                if (delta > 0) {
+                    const currentFPS = 1000 / delta;
+                    
+                    if (currentFPS < 30 && qualityLevel > 0.5) {
+                        qualityLevel *= 0.95;
+                    } else if (currentFPS > 50 && qualityLevel < 1) {
+                        qualityLevel *= 1.05;
+                    }
+                    
+                    qualityLevel = p.constrain(qualityLevel, 0.5, 1);
+                }
+            }
+            
+            p.windowResized = () => {
+                p.resizeCanvas(p.windowWidth, p.windowHeight);
+                initFlowField();
+            };
+        };
+        
+        new p5(sketch);
+    </script>
+
+              
+          
+                
+          
+              
